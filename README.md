@@ -4,7 +4,9 @@ A ComfyUI custom node package based on the BAGEL-7B-MoT multimodal model.
 
 ## About BAGEL
 
-![bagel](https://camo.githubusercontent.com/f42939a4695f1e8460fa171a8730a45fa8221addf7e04506814e0be55e2224e9/68747470733a2f2f6c66332d7374617469632e62797465646e73646f632e636f6d2f6f626a2f6564656e2d636e2f6e75686f6a75627270732f62616e6e65722e706e67)
+<p align="center">
+  <img src="https://lf3-static.bytednsdoc.com/obj/eden-cn/nuhojubrps/banner.png" alt="BAGEL" width="480"/>
+</p>
 
 BAGEL is an open-source multimodal foundation model with 7B active parameters (14B total) that adopts a Mixture-of-Transformer-Experts (MoT) architecture. It is designed for multimodal understanding and generation tasks, outperforming top-tier open-source VLMs like Qwen2.5-VL and InternVL-2.5 on standard multimodal understanding leaderboards, and delivering text-to-image quality competitive with specialist generators such as SD3.
 
@@ -30,12 +32,7 @@ python -c "from huggingface_hub import snapshot_download; snapshot_download(repo
 ```
 
 ### 2. Install Dependencies
-Run the installation script:
-```bash
-python install.py
-```
-
-Or manually install dependencies:
+Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
