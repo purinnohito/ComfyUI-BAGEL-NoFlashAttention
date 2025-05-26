@@ -60,23 +60,23 @@ def set_seed(seed: int) -> int:
 
 
 def download_model_with_git(
-    model_path: str, repo_id: str = "ByteDance-Seed/BAGEL-7B-MoT"
-) -> bool:
+    model_dir: str, repo_id: str = "ByteDance-Seed/BAGEL-7B-MoT"
+) -> str:
     """
     Download model using git lfs (recommended method)
 
     Args:
-        model_path: Local path to download the model
+        model_dir: Directory to download the repo to (repo files will be placed directly here)
         repo_id: Hugging Face repository ID
 
     Returns:
-        True if successful, False otherwise
+        Path to the downloaded model if successful, None otherwise
     """
     try:
-        print(f"Downloading BAGEL model using git lfs to {model_path}...")
+        print(f"Downloading BAGEL model using git lfs to {model_dir}...")
 
         # Create parent directory if it doesn't exist
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        os.makedirs(model_dir, exist_ok=True)
 
         # Check if git lfs is installed
         try:
@@ -85,59 +85,59 @@ def download_model_with_git(
             print("Git LFS not found. Installing git lfs...")
             subprocess.run(["git", "lfs", "install"], check=True)
 
-        # Clone the repository
-        clone_cmd = ["git", "clone", f"https://huggingface.co/{repo_id}", model_path]
+        # Clone the repository directly to model_dir
+        clone_cmd = ["git", "clone", f"https://huggingface.co/{repo_id}", model_dir]
 
         result = subprocess.run(clone_cmd, capture_output=True, text=True)
         if result.returncode == 0:
-            print(f"Successfully downloaded BAGEL model to {model_path}")
-            return True
+            print(f"Successfully downloaded BAGEL model to {model_dir}")
+            return model_dir
         else:
             print(f"Git clone failed: {result.stderr}")
-            return False
+            return None
 
     except Exception as e:
         print(f"Error downloading model with git: {e}")
-        return False
+        return None
 
 
 def download_model_with_hf_hub(
-    model_path: str, repo_id: str = "ByteDance-Seed/BAGEL-7B-MoT"
-) -> bool:
+    model_dir: str, repo_id: str = "ByteDance-Seed/BAGEL-7B-MoT"
+) -> str:
     """
     Download model using huggingface_hub (fallback method)
 
     Args:
-        model_path: Local path to download the model
+        model_dir: Directory to download the repo to (repo files will be placed directly here)
         repo_id: Hugging Face repository ID
 
     Returns:
-        True if successful, False otherwise
+        Path to the downloaded model if successful, None otherwise
     """
     try:
         from huggingface_hub import snapshot_download
 
-        print(f"Downloading BAGEL model using huggingface_hub to {model_path}...")
+        print(f"Downloading BAGEL model using huggingface_hub to {model_dir}...")
 
         # Create parent directory if it doesn't exist
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        os.makedirs(model_dir, exist_ok=True)
 
-        # Download the model
+        # Download the entire repository directly to model_dir
         snapshot_download(
-            repo_id=repo_id, local_dir=model_path, local_dir_use_symlinks=False
+            repo_id=repo_id, local_dir=model_dir, local_dir_use_symlinks=False
         )
 
-        print(f"Successfully downloaded BAGEL model to {model_path}")
-        return True
+        print(f"Successfully downloaded BAGEL model to {model_dir}")
+        return model_dir
 
     except ImportError:
         print(
             "huggingface_hub not installed. Please install it with: pip install huggingface_hub"
         )
-        return False
+        return None
     except Exception as e:
         print(f"Error downloading model with huggingface_hub: {e}")
-        return False
+        return None
 
 
 def check_model_files(model_path: str) -> bool:
@@ -222,8 +222,12 @@ class BagelModelLoader:
             Dictionary containing all model components
         """
         try:
-            # Define local model directory
-            local_model_dir = os.path.join(os.getcwd(), "models", "bagel")
+            # Define base model directory
+            base_model_dir = os.path.join(os.getcwd(), "models", "bagel")
+
+            # Extract repo name from model_path for the subdirectory
+            repo_name = model_path.split("/")[-1] if "/" in model_path else model_path
+            local_model_dir = os.path.join(base_model_dir, repo_name)
 
             # Check if model exists locally, if not, download it
             if not os.path.exists(local_model_dir) or not check_model_files(
@@ -232,10 +236,12 @@ class BagelModelLoader:
                 print(
                     f"Model not found locally. Attempting to download from {model_path}..."
                 )
-                os.makedirs(local_model_dir, exist_ok=True)
 
                 # Attempt to download using huggingface_hub
-                if not download_model_with_hf_hub(local_model_dir, repo_id=model_path):
+                downloaded_path = download_model_with_hf_hub(
+                    local_model_dir, repo_id=model_path
+                )
+                if not downloaded_path:
                     raise FileNotFoundError(
                         f"Failed to download BAGEL model. Please manually download it from "
                         f"{model_path} and place it in {local_model_dir}"

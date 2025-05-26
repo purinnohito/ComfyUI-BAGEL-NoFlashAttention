@@ -20,7 +20,7 @@ BAGEL is an open-source multimodal foundation model with 7B active parameters (1
 ## Installation
 
 ### 1. Download Model
-The BAGEL-7B-MoT model will be automatically downloaded to `models/bagel/` when first used. You can also manually download it:
+The BAGEL-7B-MoT model will be automatically downloaded to `models/bagel/BAGEL-7B-MoT/` when first used. You can also manually download it:
 ```bash
 # Clone model using git lfs (recommended)
 git lfs install
