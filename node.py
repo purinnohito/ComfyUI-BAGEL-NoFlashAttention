@@ -420,7 +420,7 @@ class BagelTextToImage:
                 "cfg_renorm_min": (
                     "FLOAT",
                     {
-                        "default": 1.0,
+                        "default": 0.0,
                         "min": 0.0,
                         "max": 1.0,
                         "step": 0.1,
