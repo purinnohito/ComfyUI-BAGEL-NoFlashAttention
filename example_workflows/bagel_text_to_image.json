@@ -1,9 +1,39 @@
 {
   "id": "4d670fa5-e222-4474-b3e5-6c3f211659a8",
   "revision": 0,
-  "last_node_id": 4,
-  "last_link_id": 3,
+  "last_node_id": 5,
+  "last_link_id": 6,
   "nodes": [
+    {
+      "id": 3,
+      "type": "PreviewImage",
+      "pos": [
+        863.3412475585938,
+        80
+      ],
+      "size": [
+        210,
+        246
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.30",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    },
     {
       "id": 1,
       "type": "BagelModelLoader",
@@ -25,7 +55,7 @@
           "name": "model",
           "type": "BAGEL_MODEL",
           "links": [
-            1
+            4
           ]
         }
       ],
@@ -35,49 +65,19 @@
         "Node name for S&R": "BagelModelLoader"
       },
       "widgets_values": [
-        "models/BAGEL-7B-MoT"
+        "ByteDance-Seed/BAGEL-7B-MoT"
       ]
     },
     {
-      "id": 3,
-      "type": "PreviewImage",
-      "pos": [
-        865,
-        80
-      ],
-      "size": [
-        210,
-        246
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 2
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.30",
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 2,
+      "id": 5,
       "type": "BagelTextToImage",
       "pos": [
         415,
         80
       ],
       "size": [
-        400,
-        372
+        398.34124755859375,
+        429.22491455078125
       ],
       "flags": {},
       "order": 1,
@@ -87,7 +87,7 @@
           "label": "model",
           "name": "model",
           "type": "BAGEL_MODEL",
-          "link": 1
+          "link": 4
         }
       ],
       "outputs": [
@@ -96,7 +96,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            2
+            5
           ]
         },
         {
@@ -104,18 +104,18 @@
           "name": "thinking",
           "type": "STRING",
           "links": [
-            3
+            6
           ]
         }
       ],
       "properties": {
         "aux_id": "neverbiasu/ComfyUI-Bagel",
-        "ver": "4bb49e5232604e4838463f130b3ba7026e428c1d",
+        "ver": "70a0dddad5c0d416faffd72549909b693baa0113",
         "Node name for S&R": "BagelTextToImage"
       },
       "widgets_values": [
         "A female cosplayer portraying an ethereal fairy or elf, wearing a flowing dress made of delicate fabrics in soft, mystical colors like emerald green and silver. She has pointed ears, a gentle, enchanting expression, and her outfit is adorned with sparkling jewels and intricate patterns. The background is a magical forest with glowing plants, mystical creatures, and a serene atmosphere.",
-        6952,
+        843396,
         "randomize",
         "1:1",
         4,
@@ -123,7 +123,7 @@
         true,
         0.4,
         3,
-        1,
+        0,
         "global",
         0.3,
         [
@@ -136,12 +136,12 @@
       "id": 4,
       "type": "ShowText|pysssss",
       "pos": [
-        865,
+        863.3412475585938,
         406
       ],
       "size": [
-        295.9617614746094,
-        404.6077880859375
+        316.9443359375,
+        529.0303955078125
       ],
       "flags": {},
       "order": 3,
@@ -151,7 +151,7 @@
           "label": "text",
           "name": "text",
           "type": "STRING",
-          "link": 3
+          "link": 6
         }
       ],
       "outputs": [
@@ -175,24 +175,24 @@
   ],
   "links": [
     [
-      1,
+      4,
       1,
       0,
-      2,
+      5,
       0,
       "BAGEL_MODEL"
     ],
     [
-      2,
-      2,
+      5,
+      5,
       0,
       3,
       0,
       "IMAGE"
     ],
     [
-      3,
-      2,
+      6,
+      5,
       1,
       4,
       0,
@@ -203,10 +203,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.9646149645000008,
+      "scale": 0.8769226950000005,
       "offset": [
-        103.19549503921537,
-        -179.86970541496137
+        -213.3995004207333,
+        -311.7939442906061
       ]
     },
     "frontendVersion": "1.17.11",
