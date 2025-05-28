@@ -69,3 +69,19 @@ This project is licensed under the Apache 2.0 License. Please refer to the offic
 ## Contribution
 
 Contributions are welcome! Please submit issue reports and feature requests. If you wish to contribute code, please create an issue to discuss your ideas first.
+
+## FAQ
+
+### 1. VRAM Requirements
+The official recommendation for generating a 1024×1024 image is over 80GB GPU memory. However, multi-GPU setups can distribute the memory load. For example:
+- **Single GPU**: A100 (40GB) takes approximately 340-380 seconds per image.
+- **Multi-GPU**: 3 RTX3090 GPUs (24GB each) complete the task in about 1 minute.
+- **Compressed Model**: Using the DFloat11 version requires only 22GB VRAM and can run on a single 24GB GPU, with peak memory usage around 21.76GB (A100) and generation time of approximately 58 seconds.
+
+For more details, visit the [GitHub issue](https://github.com/ByteDance-Seed/Bagel/issues/4).
+
+### 2. Quantized Version
+A quantized version of BAGEL is currently under development, which aims to reduce VRAM requirements further.
+
+### 3. NameError: 'Qwen2Config' is not defined
+This issue is likely related to environment or dependency problems. For more information, refer to [this GitHub issue](https://github.com/neverbiasu/ComfyUI-BAGEL/issues/7).
