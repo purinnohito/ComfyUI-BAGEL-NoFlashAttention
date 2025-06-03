@@ -13,6 +13,8 @@ from torch.nn.attention.flex_attention import create_block_mask
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 
+from typing import List, Tuple, Optional, Any 
+
 from data.data_utils import (
     create_sparse_mask, 
     get_flattened_position_ids_extrapolate, 
@@ -669,6 +671,7 @@ class Bagel(PreTrainedModel):
         cfg_img_key_values_lens: Optional[torch.IntTensor] = None,
         cfg_img_packed_key_value_indexes: Optional[torch.LongTensor] = None,
         cfg_type: str = "parallel",
+        pbar: Optional[Any] = None,
     ):
         x_t = packed_init_noises
 
@@ -678,7 +681,9 @@ class Bagel(PreTrainedModel):
         timesteps = timesteps[:-1]
 
         for i, t in enumerate(timesteps):
-
+            if pbar:
+                pbar.update(1)
+                
             timestep = torch.tensor([t] * x_t.shape[0], device=x_t.device)
             if t > cfg_interval[0] and t <= cfg_interval[1]:
                 cfg_text_scale_ = cfg_text_scale
