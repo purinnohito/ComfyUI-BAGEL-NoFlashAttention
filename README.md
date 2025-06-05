@@ -29,6 +29,9 @@ The ComfyUI-Bagel node supports automatic model selection with intelligent quant
   - **INT8**: 8-bit quantization (~22-32GB VRAM, moderate compression)
 - **DFloat11/BAGEL-7B-MoT-DF11**: Pre-quantized model (~22GB VRAM, single 24GB GPU compatible)
 
+> [!IMPORTANT]
+> DFloat11 version do not need quantization again!
+
 **Memory is automatically calculated** based on your GPU specifications and selected quantization mode - no manual configuration needed!
 
 Models will be automatically downloaded to `models/bagel/` when first selected. You can also manually download them:
@@ -116,8 +119,6 @@ Contributions are welcome! Please submit issue reports and feature requests. If 
 
 ## FAQ
 
-## FAQ
-
 ### 1. VRAM Requirements & Optimization
 With the new automatic memory management and quantization options:
 - **24GB GPU (Single)**: Use NF4 quantization or DFloat11 model for optimal performance
@@ -127,4 +128,6 @@ With the new automatic memory management and quantization options:
 - **Memory is calculated automatically** based on your hardware - no manual configuration needed!
 
 ### 2. NameError: 'Qwen2Config' is not defined
-This issue is likely related to environment or dependency problems. For more information, refer to [this GitHub issue](https://github.com/neverbiasu/ComfyUI-BAGEL/issues/7).
+This issue is likely related to environment or dependency problems. You can install flash-attention and triton with the following links:
+[v2.7.4.post1_crossos00](https://github.com/loscrossos/lib_flashattention/releases/tag/v2.7.4.post1_crossos00) [flash-attention-windows-wheel](https://huggingface.co/lldacing/flash-attention-windows-wheel/tree/main) [triton-windows-builds](https://hf-mirror.com/madbuda/triton-windows-builds/tree/main)
+For more information, refer to [this GitHub issue](https://github.com/neverbiasu/ComfyUI-BAGEL/issues/7).
