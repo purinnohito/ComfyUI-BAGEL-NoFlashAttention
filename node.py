@@ -21,6 +21,7 @@ try:
         init_empty_weights,
         dispatch_model,
     )
+    from accelerate.utils import BnbQuantizationConfig, load_and_quantize_model
     from data.data_utils import add_special_tokens, pil_img2rgb
     from data.transforms import ImageTransform
     from inferencer import InterleaveInferencer
@@ -199,24 +200,104 @@ def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
     return Image.fromarray(img_array)
 
 
+def calculate_optimal_memory_gb(quantization_mode: str) -> float:
+    """
+    Calculate optimal memory usage based on available GPU memory and quantization mode.
+
+    Args:
+        quantization_mode: Quantization mode (1=BF16, 2=NF4, 3=INT8)
+
+    Returns:
+        Optimal memory usage in GB per GPU
+    """
+    try:
+        if not torch.cuda.is_available():
+            return 8.0  # CPU fallback
+
+        # Get total GPU memory
+        total_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+
+        # Reserve memory for system and other processes
+        if quantization_mode == "BF16":  # BF16
+            # Full precision needs more headroom
+            reserved_ratio = 0.15  # Reserve 15%
+            optimal_ratio = 0.8  # Use 80% of remaining
+        elif quantization_mode == "NF4":  # NF4
+            # 4-bit quantization is very memory efficient
+            reserved_ratio = 0.1  # Reserve 10%
+            optimal_ratio = 0.85  # Use 85% of remaining
+        elif quantization_mode == "INT8":  # INT8
+            # 8-bit quantization is moderately efficient
+            reserved_ratio = 0.1  # Reserve 10%
+            optimal_ratio = 0.82  # Use 82% of remaining
+        else:
+            # Default conservative settings
+            reserved_ratio = 0.15
+            optimal_ratio = 0.75
+
+        available_memory = total_memory_gb * (1 - reserved_ratio)
+        optimal_memory = available_memory * optimal_ratio
+
+        # Set reasonable bounds
+        min_memory = 8.0
+        max_memory = min(80.0, total_memory_gb * 0.9)  # Never exceed 90% of total
+
+        optimal_memory = max(min_memory, min(optimal_memory, max_memory))
+
+        mode_name = quantization_mode
+
+        print(
+            f"GPU Memory: {total_memory_gb:.1f}GB total, using {optimal_memory:.1f}GB for {mode_name} quantization"
+        )
+
+        return optimal_memory
+
+    except Exception as e:
+        print(f"Error calculating optimal memory, using default: {e}")
+        return 24.0
+
+
 class BagelModelLoader:
-    """BAGEL Model Loader Node"""
+    """
+    Unified BAGEL Model Loader with Dynamic Quantization Support
+
+    Supports both standard BAGEL and DFloat11 models with optional quantization
+    for ByteDance-Seed/BAGEL-7B-MoT model.
+    """
 
     SUPPORTED_MODEL_REPOS = [
-        "ByteDance-Seed/BAGEL-7B-MoT",  # Standard BAGEL
-        "DFloat11/BAGEL-7B-MoT-DF11",  # DFloat11 Quantized
+        "ByteDance-Seed/BAGEL-7B-MoT",
+        "DFloat11/BAGEL-7B-MoT-DF11",
     ]
+
+    QUANTIZATION_MODES = {
+        "BF16": "Standard (FP16/BF16)",
+        "NF4": "NF4 (4-bit Quantization)",
+        "INT8": "INT8 (8-bit Quantization)",
+    }
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {
+        inputs = {
             "required": {
                 "model_repo_id": (
                     cls.SUPPORTED_MODEL_REPOS,
-                    {"default": cls.SUPPORTED_MODEL_REPOS[0]},
+                    {
+                        "default": cls.SUPPORTED_MODEL_REPOS[0],
+                        "tooltip": "Choose BAGEL model: Standard supports quantization, DFloat11 is pre-quantized",
+                    },
                 ),
             }
         }
+        inputs["required"]["quantization_mode"] = (
+            list(cls.QUANTIZATION_MODES.keys()),
+            {
+                "default": "BF16",
+                "tooltip": "Quantization: BF16=Standard, NF4=4-bit, INT8=8-bit (Only for ByteDance model)",
+            },
+        )
+
+        return inputs
 
     RETURN_TYPES = ("BAGEL_MODEL",)
     RETURN_NAMES = ("model",)
@@ -224,7 +305,7 @@ class BagelModelLoader:
     CATEGORY = "BAGEL/Core"
 
     @classmethod
-    def VALIDATE_INPUTS(cls, model_repo_id):
+    def VALIDATE_INPUTS(cls, model_repo_id, quantization_mode="BF16", **kwargs):
         """Validate input parameters"""
         if model_repo_id not in cls.SUPPORTED_MODEL_REPOS:
             return f"Unsupported model_repo_id: {model_repo_id}. Supported: {cls.SUPPORTED_MODEL_REPOS}"
@@ -232,27 +313,55 @@ class BagelModelLoader:
         if "DFloat11" in model_repo_id and DFloat11Model is None:
             return "DFloat11 model selected, but DFloat11Model library is not installed or failed to import. Please install it: pip install dfloat11"
 
+        if quantization_mode not in cls.QUANTIZATION_MODES:
+            return f"Invalid quantization_mode: {quantization_mode}. Supported: {list(cls.QUANTIZATION_MODES.keys())}"
+
+        if "DFloat11" in model_repo_id and quantization_mode != "BF16":
+            print(
+                f"Warning: DFloat11 model ignores quantization_mode {quantization_mode}. Using built-in quantization."
+            )
+
+        if model_repo_id == "ByteDance-Seed/BAGEL-7B-MoT" and quantization_mode in [
+            "NF4",
+            "INT8",
+        ]:
+            try:
+                import bitsandbytes as bnb
+            except ImportError:
+                return f"Quantization mode {quantization_mode} requires bitsandbytes. Please install: pip install bitsandbytes"
+
         return True
 
-    def load_model(self, model_repo_id: str) -> Tuple[Dict[str, Any]]:
+    def load_model(
+        self,
+        model_repo_id: str,
+        quantization_mode: str = "BF16",
+    ) -> Tuple[Dict[str, Any]]:
         """
-        Load BAGEL model and its components. Automatically download the model if not found.
-
-        Args:
-            model_repo_id: Hugging Face model repository ID (e.g., "ByteDance-Seed/BAGEL-7B-MoT" or "DFloat11/BAGEL-7B-MoT-DF11")
-        Returns:
-            Dictionary containing all model components
+        Load BAGEL model with unified interface supporting both standard and DFloat11 models.
+        Quantization is applied only to ByteDance-Seed/BAGEL-7B-MoT model.
         """
         try:
             is_df11_model = model_repo_id == "DFloat11/BAGEL-7B-MoT-DF11"
             is_standard_model = model_repo_id == "ByteDance-Seed/BAGEL-7B-MoT"
+
+            if is_df11_model and quantization_mode != "BF16":
+                print(
+                    f"DFloat11 model detected. Ignoring quantization_mode {quantization_mode} and using built-in quantization."
+                )
+                quantization_mode = "BF16"
+
+            print(
+                f"Loading {model_repo_id} with {self.QUANTIZATION_MODES[quantization_mode]} mode..."
+            )
+
             base_repo_dir = os.path.join(comfy_models_dir, "bagel")
             repo_name_segment = model_repo_id.split("/")[-1]
             local_model_dir = os.path.join(base_repo_dir, repo_name_segment)
 
             common_vae_dir = os.path.join(comfy_models_dir, "vae")
             common_vae_file = os.path.join(common_vae_dir, "ae.safetensors")
-            # Check if model exists locally, if not, download it
+
             if not os.path.exists(local_model_dir) or not check_model_files(
                 local_model_dir, is_df11_model
             ):
@@ -272,7 +381,6 @@ class BagelModelLoader:
 
                 print(f"Successfully downloaded BAGEL model to {local_model_dir}")
 
-            # Final check that all required files exist
             if not check_model_files(local_model_dir, is_df11_model):
                 raise FileNotFoundError(
                     f"Required model files missing in {local_model_dir}"
@@ -353,9 +461,14 @@ class BagelModelLoader:
                     bfloat16_model=model,
                     device="cpu",
                 )
+
+                # Create offload directory for model dispatch
+                offload_dir = os.path.join(local_model_dir, "offload")
+                os.makedirs(offload_dir, exist_ok=True)
+
                 device_map = infer_auto_device_map(
                     model,
-                    max_memory={0: "40GiB"},
+                    max_memory={0: f"{calculate_optimal_memory_gb('BF16')}GiB"},
                     no_split_module_classes=[
                         "Bagel",
                         "Qwen2MoTDecoderLayer",
@@ -379,11 +492,25 @@ class BagelModelLoader:
                         else:
                             device_map[k] = "cuda:0"
                 else:
+                    # Get first device with fallback to cuda:0
                     first_device = device_map.get(same_device_modules[0])
+                    if first_device is None:
+                        for device in device_map.values():
+                            if isinstance(device, str) and device.startswith("cuda"):
+                                first_device = device
+                                break
+                        else:
+                            first_device = "cuda:0"
+
                     for k in same_device_modules:
-                        if k in device_map:
-                            device_map[k] = first_device
-                model = dispatch_model(model, device_map=device_map, force_hooks=True)
+                        device_map[k] = first_device
+
+                model = dispatch_model(
+                    model,
+                    device_map=device_map,
+                    offload_dir=offload_dir,
+                    force_hooks=True,
+                )
                 model = model.eval()
                 inferencer = InterleaveInferencer(
                     model=model,
@@ -422,7 +549,7 @@ class BagelModelLoader:
                     max_latent_size=64,
                 )
 
-                # Initialize model
+                # Initialize empty model
                 with init_empty_weights():
                     language_model = Qwen2ForCausalLM(llm_config)
                     vit_model = SiglipVisionModel(vit_config)
@@ -431,22 +558,112 @@ class BagelModelLoader:
                         vit_config, meta=True
                     )
 
-                # Load tokenizer
                 tokenizer = Qwen2Tokenizer.from_pretrained(local_model_dir)
                 tokenizer, new_token_ids, _ = add_special_tokens(tokenizer)
 
-                # Create transformers
                 vae_transform = ImageTransform(1024, 512, 16)
                 vit_transform = ImageTransform(980, 224, 14)
-                model_device_final_str = "cpu"
 
-                model = load_checkpoint_and_dispatch(
-                    model,
-                    checkpoint=os.path.join(local_model_dir, "ema.safetensors"),
-                    device_map="auto",
-                    dtype=torch.bfloat16,
-                    force_hooks=True,
-                ).eval()
+                if quantization_mode in ["NF4", "INT8"]:
+                    max_memory_gb = calculate_optimal_memory_gb(quantization_mode)
+                    max_memory_per_gpu = f"{max_memory_gb}GiB"
+                    device_map = infer_auto_device_map(
+                        model,
+                        max_memory={
+                            i: max_memory_per_gpu
+                            for i in range(torch.cuda.device_count())
+                        },
+                        no_split_module_classes=["Bagel", "Qwen2MoTDecoderLayer"],
+                    )
+                else:
+                    device_map = infer_auto_device_map(
+                        model,
+                        no_split_module_classes=["Bagel", "Qwen2MoTDecoderLayer"],
+                    )
+
+                # Ensure same device placement for critical modules
+                same_device_modules = [
+                    "language_model.model.embed_tokens",
+                    "time_embedder",
+                    "latent_pos_embed",
+                    "vae2llm",
+                    "llm2vae",
+                    "connector",
+                    "vit_pos_embed",
+                ]
+
+                if torch.cuda.device_count() == 1:
+                    first_device = device_map.get(same_device_modules[0], "cuda:0")
+                    for k in same_device_modules:
+                        if k in device_map:
+                            device_map[k] = first_device
+                        else:
+                            device_map[k] = "cuda:0"
+                else:
+                    first_device = device_map.get(same_device_modules[0])
+                    if first_device is None:
+                        for device in device_map.values():
+                            if isinstance(device, str) and device.startswith("cuda"):
+                                first_device = device
+                                break
+                        else:
+                            first_device = "cuda:0"
+
+                    for k in same_device_modules:
+                        if k in device_map:
+                            device_map[k] = first_device
+                        else:
+                            device_map[k] = first_device
+
+                # Load model based on quantization mode
+                checkpoint_path = os.path.join(local_model_dir, "ema.safetensors")
+
+                if quantization_mode == "BF16":
+                    # Standard loading
+                    print("Loading model in standard FP16/BF16 mode...")
+                    model = load_checkpoint_and_dispatch(
+                        model,
+                        checkpoint=checkpoint_path,
+                        device_map=device_map,
+                        offload_buffers=True,
+                        offload_folder="offload",
+                        dtype=torch.bfloat16,
+                        force_hooks=True,
+                    ).eval()
+
+                elif quantization_mode == "NF4":
+                    print("Loading model with NF4 (4-bit) quantization...")
+                    bnb_quantization_config = BnbQuantizationConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_use_double_quant=False,
+                        bnb_4bit_quant_type="nf4",
+                    )
+                    model = load_and_quantize_model(
+                        model,
+                        weights_location=checkpoint_path,
+                        bnb_quantization_config=bnb_quantization_config,
+                        device_map=device_map,
+                        offload_folder="offload",
+                    ).eval()
+
+                elif quantization_mode == "INT8":
+                    print("Loading model with INT8 (8-bit) quantization...")
+                    bnb_quantization_config = BnbQuantizationConfig(
+                        load_in_8bit=True, torch_dtype=torch.bfloat16
+                    )
+                    model = load_and_quantize_model(
+                        model,
+                        weights_location=checkpoint_path,
+                        bnb_quantization_config=bnb_quantization_config,
+                        device_map=device_map,
+                        offload_folder="offload",
+                    ).eval()
+
+                else:
+                    raise ValueError(
+                        f"Unsupported quantization mode: {quantization_mode}"
+                    )
 
                 # Create inferencer
                 inferencer = InterleaveInferencer(
@@ -458,7 +675,6 @@ class BagelModelLoader:
                     new_token_ids=new_token_ids,
                 )
 
-                # Wrap as model dictionary
                 model_dict = {
                     "model": model,
                     "inferencer": inferencer,
@@ -468,9 +684,16 @@ class BagelModelLoader:
                     "vit_transform": vit_transform,
                     "config": config,
                     "model_path": local_model_dir,
+                    "model_repo_id": model_repo_id,
+                    "quantization_mode": quantization_mode,
+                    "quantization_info": self.QUANTIZATION_MODES[quantization_mode],
+                    "is_df11": False,
+                    "device": "cuda" if torch.cuda.is_available() else "cpu",
                 }
 
-                print(f"Successfully loaded BAGEL model from {local_model_dir}")
+                print(
+                    f"Successfully loaded BAGEL model with {self.QUANTIZATION_MODES[quantization_mode]} mode"
+                )
                 return (model_dict,)
 
         except Exception as e:
@@ -626,7 +849,7 @@ class BagelTextToImage:
         show_thinking: bool = False,
         cfg_interval: float = 0.4,
         timestep_shift: float = 3.0,
-        cfg_renorm_min: float = 1.0,
+        cfg_renorm_min: float = 0.0,
         cfg_renorm_type: str = "global",
         text_temperature: float = 0.3,
     ) -> Tuple[torch.Tensor, str]:
@@ -687,7 +910,9 @@ class BagelTextToImage:
             pbar = ProgressBar(actual_iterations)
 
             # Call inferencer, passing pbar
-            result = inferencer(text=prompt, think=show_thinking, pbar=pbar, **inference_hyper)
+            result = inferencer(
+                text=prompt, think=show_thinking, pbar=pbar, **inference_hyper
+            )
 
             # Convert image format
             pil_image = result["image"]
@@ -792,7 +1017,7 @@ class BagelImageEdit:
                 "cfg_renorm_min": (
                     "FLOAT",
                     {
-                        "default": 1.0,
+                        "default": 0.0,
                         "min": 0.0,
                         "max": 1.0,
                         "step": 0.1,
@@ -875,7 +1100,7 @@ class BagelImageEdit:
         show_thinking: bool = False,
         cfg_interval: float = 0.0,
         timestep_shift: float = 3.0,
-        cfg_renorm_min: float = 1.0,
+        cfg_renorm_min: float = 0.0,
         cfg_renorm_type: str = "text_channel",
         text_temperature: float = 0.3,
     ) -> Tuple[torch.Tensor, str]:
@@ -931,7 +1156,11 @@ class BagelImageEdit:
 
             # Call inferencer, passing pbar
             result = inferencer(
-                image=pil_image, text=prompt, think=show_thinking, pbar=pbar, **inference_hyper
+                image=pil_image,
+                text=prompt,
+                think=show_thinking,
+                pbar=pbar,
+                **inference_hyper,
             )
 
             # Convert image format
