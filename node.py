@@ -1058,10 +1058,6 @@ class BagelImageEdit:
         num_timesteps,
         **kwargs,
     ):
-        """Validate input parameters"""
-        if not isinstance(prompt, str) or not prompt.strip():
-            return "Prompt must be a non-empty string"
-
         if not isinstance(seed, int) or seed < 0:
             return "Seed must be a non-negative integer"
 
