@@ -813,9 +813,6 @@ class BagelTextToImage:
         cls, model, prompt, seed, image_ratio, cfg_text_scale, num_timesteps, **kwargs
     ):
         """Validate input parameters"""
-        if not isinstance(prompt, str) or not prompt.strip():
-            return "Prompt must be a non-empty string"
-
         if not isinstance(seed, int) or seed < 0:
             return "Seed must be a non-negative integer"
 
@@ -1234,9 +1231,6 @@ class BagelImageUnderstanding:
     @classmethod
     def VALIDATE_INPUTS(cls, model, image, prompt, **kwargs):
         """Validate input parameters"""
-        if not isinstance(prompt, str) or not prompt.strip():
-            return "Prompt must be a non-empty string"
-
         # Validate optional parameters
         if "text_temperature" in kwargs:
             temp = kwargs["text_temperature"]
