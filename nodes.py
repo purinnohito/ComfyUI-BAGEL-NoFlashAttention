@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import random
 import subprocess
+import importlib
 from typing import Dict, Tuple, Optional, Any, Union
 from PIL import Image
 from folder_paths import folder_names_and_paths, models_dir as comfy_models_dir
@@ -12,6 +13,8 @@ from comfy.utils import ProgressBar
 # Add current directory to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
+
+from .model_utils import discover_bagel_model_dirs, is_df11_name
 
 # Import BAGEL related modules
 try:
@@ -182,6 +185,9 @@ def check_model_files(model_path: str, is_df11_model: bool) -> bool:
     return True
 
 
+# discover_bagel_model_dirs is imported from model_utils or provided as a fallback at file top
+
+
 def pil_to_tensor(img: Image.Image) -> torch.Tensor:
     """Convert PIL image to ComfyUI tensor format"""
     img_array = np.array(img).astype(np.float32) / 255.0
@@ -279,17 +285,35 @@ class BagelModelLoader:
 
     @classmethod
     def INPUT_TYPES(cls):
+        # Discover local models and expose them as local:<name> choices
+        discovered = discover_bagel_model_dirs()
+        # show local folder names (e.g. "BAGEL-7B-MoT") and supported remote repo ids
+        local_choices = [name for name in discovered.keys()]
+
+        choices = local_choices + cls.SUPPORTED_MODEL_REPOS
+
+        default_choice = local_choices[0] if len(local_choices) > 0 else cls.SUPPORTED_MODEL_REPOS[0]
+
         inputs = {
             "required": {
-                "model_repo_id": (
-                    cls.SUPPORTED_MODEL_REPOS,
+                "model_path": (
+                    choices,
                     {
-                        "default": cls.SUPPORTED_MODEL_REPOS[0],
-                        "tooltip": "Choose BAGEL model: Standard supports quantization, DFloat11 is pre-quantized",
+                        "default": default_choice,
+                        "tooltip": "Select a local folder under models/bagel (folder name) or a supported remote repository id",
+                    },
+                ),
+                # If True, will attempt to download remote repo when local folder is missing
+                "allow_auto_download": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Allow automatic download of supported remote model if local folder is missing",
                     },
                 ),
             }
         }
+
         inputs["required"]["quantization_mode"] = (
             list(cls.QUANTIZATION_MODES.keys()),
             {
@@ -306,45 +330,73 @@ class BagelModelLoader:
     CATEGORY = "BAGEL/Core"
 
     @classmethod
-    def VALIDATE_INPUTS(cls, model_repo_id, quantization_mode="BF16", **kwargs):
-        """Validate input parameters"""
-        if model_repo_id not in cls.SUPPORTED_MODEL_REPOS:
-            return f"Unsupported model_repo_id: {model_repo_id}. Supported: {cls.SUPPORTED_MODEL_REPOS}"
+    def VALIDATE_INPUTS(cls, model_path, quantization_mode="BF16", **kwargs):
+        """Validate input parameters. Supports local:<name> and remote repo ids.
 
-        if "DFloat11" in model_repo_id and DFloat11Model is None:
-            return "DFloat11 model selected, but DFloat11Model library is not installed or failed to import. Please install it: pip install dfloat11"
+        kwargs may contain allow_auto_download (ignored for validation).
+        """
+        discovered = discover_bagel_model_dirs()
 
+        # Validate quantization_mode
         if quantization_mode not in cls.QUANTIZATION_MODES:
             return f"Invalid quantization_mode: {quantization_mode}. Supported: {list(cls.QUANTIZATION_MODES.keys())}"
 
-        if "DFloat11" in model_repo_id and quantization_mode != "BF16":
-            print(
-                f"Warning: DFloat11 model ignores quantization_mode {quantization_mode}. Using built-in quantization."
-            )
+        # Determine whether selected model implies DF11
+        final_is_df11 = False
+        # local folder selected (just the folder name)
+        if isinstance(model_path, str) and model_path in discovered:
+            name = model_path
+            final_is_df11 = is_df11_name(name)
+        # remote selection must be one of supported repos
+        elif isinstance(model_path, str) and model_path in cls.SUPPORTED_MODEL_REPOS:
+            final_is_df11 = is_df11_name(model_path)
+        else:
+            return f"Invalid model selection: {model_path}. Choose a local folder under models/bagel or a supported remote repo: {cls.SUPPORTED_MODEL_REPOS}"
 
-        if model_repo_id == "ByteDance-Seed/BAGEL-7B-MoT" and quantization_mode in [
-            "NF4",
-            "INT8",
-        ]:
+        if final_is_df11 and DFloat11Model is None:
+            return "DFloat11 model selected, but DFloat11Model library is not installed or failed to import. Please install it: pip install dfloat11"
+
+        # If choosing quantization modes that require bitsandbytes for standard models
+        if quantization_mode in ["NF4", "INT8"] and not final_is_df11:
             try:
-                import bitsandbytes as bnb
-            except ImportError:
+                if importlib.util.find_spec("bitsandbytes") is None:
+                    return f"Quantization mode {quantization_mode} requires bitsandbytes. Please install: pip install bitsandbytes"
+            except Exception:
                 return f"Quantization mode {quantization_mode} requires bitsandbytes. Please install: pip install bitsandbytes"
 
+        # All validations passed
         return True
 
     def load_model(
         self,
-        model_repo_id: str,
+        model_path: str,
         quantization_mode: str = "BF16",
+        allow_auto_download: bool = False,
     ) -> Tuple[Dict[str, Any]]:
         """
         Load BAGEL model with unified interface supporting both standard and DFloat11 models.
         Quantization is applied only to ByteDance-Seed/BAGEL-7B-MoT model.
         """
         try:
-            is_df11_model = model_repo_id == "DFloat11/BAGEL-7B-MoT-DF11"
-            is_standard_model = model_repo_id == "ByteDance-Seed/BAGEL-7B-MoT"
+
+            discovered = discover_bagel_model_dirs()
+
+            # Resolve local_model_dir and df11 flag
+            is_df11_model = False
+            local_model_dir = None
+            # If a local folder name is selected
+            if isinstance(model_path, str) and model_path in discovered:
+                repo_name_segment = model_path
+                local_model_dir = discovered[repo_name_segment]
+                is_df11_model = is_df11_name(repo_name_segment)
+            else:
+                # remote selection must be in SUPPORTED_MODEL_REPOS
+                if model_path not in self.SUPPORTED_MODEL_REPOS:
+                    raise FileNotFoundError(f"Unsupported remote model selection: {model_path}. Supported: {self.SUPPORTED_MODEL_REPOS}")
+                repo_name_segment = model_path.split("/")[-1]
+                base_repo_dir = os.path.join(comfy_models_dir, "bagel")
+                local_model_dir = os.path.join(base_repo_dir, repo_name_segment)
+                is_df11_model = is_df11_name(model_path)
 
             if is_df11_model and quantization_mode != "BF16":
                 print(
@@ -353,31 +405,29 @@ class BagelModelLoader:
                 quantization_mode = "BF16"
 
             print(
-                f"Loading {model_repo_id} with {self.QUANTIZATION_MODES[quantization_mode]} mode..."
+                f"Loading {model_path} -> local folder {local_model_dir} with {self.QUANTIZATION_MODES[quantization_mode]} mode..."
             )
-
-            base_repo_dir = os.path.join(comfy_models_dir, "bagel")
-            repo_name_segment = model_repo_id.split("/")[-1]
-            local_model_dir = os.path.join(base_repo_dir, repo_name_segment)
 
             common_vae_dir = os.path.join(comfy_models_dir, "vae")
             common_vae_file = os.path.join(common_vae_dir, "ae.safetensors")
 
-            if not os.path.exists(local_model_dir) or not check_model_files(
-                local_model_dir, is_df11_model
-            ):
-                print(
-                    f"Core model files not found or incomplete for {model_repo_id} at {local_model_dir}. Attempting download..."
-                )
+            if not os.path.exists(local_model_dir) or not check_model_files(local_model_dir, is_df11_model):
+                # If the selection was a local folder, do not auto-download
+                if isinstance(model_path, str) and model_path in discovered:
+                    raise FileNotFoundError(f"Local model {model_path} missing required files in {local_model_dir}")
 
-                # Attempt to download using huggingface_hub
-                downloaded_path = download_model_with_hf_hub(
-                    local_model_dir, repo_id=model_repo_id
-                )
+                # For remote repos, only attempt download if user allowed it
+                if not allow_auto_download:
+                    raise FileNotFoundError(
+                        f"Model files for {model_path} not found in {local_model_dir}. Enable allow_auto_download=True to allow automatic download."
+                    )
+
+                print(f"Core model files not found for {model_path} at {local_model_dir}. allow_auto_download=True -> attempting download...")
+
+                downloaded_path = download_model_with_hf_hub(local_model_dir, repo_id=model_path)
                 if not downloaded_path:
                     raise FileNotFoundError(
-                        f"Failed to download BAGEL model. Please manually download it from "
-                        f"{model_repo_id} and place it in {local_model_dir}"
+                        f"Failed to download BAGEL model. Please manually download it from {model_path} and place it in {local_model_dir}"
                     )
 
                 print(f"Successfully downloaded BAGEL model to {local_model_dir}")
@@ -530,13 +580,13 @@ class BagelModelLoader:
                     "vit_transform": vit_transform,
                     "config": config,
                     "model_path": local_model_dir,
-                    "model_repo_id": model_repo_id,
+                    "model_repo_id": model_path,
                     "is_df11": is_df11_model,
                     "device": "cuda" if torch.cuda.is_available() else "cpu",
                 }
                 print(f"Successfully loaded BAGEL DF11 model from {local_model_dir}")
                 return (model_dict,)
-            elif is_standard_model:
+            elif not is_df11_model:
                 # Create BAGEL configuration
                 config = BagelConfig(
                     visual_gen=True,
@@ -700,7 +750,7 @@ class BagelModelLoader:
                     "vit_transform": vit_transform,
                     "config": config,
                     "model_path": local_model_dir,
-                    "model_repo_id": model_repo_id,
+                    "model_repo_id": model_path,
                     "quantization_mode": quantization_mode,
                     "quantization_info": self.QUANTIZATION_MODES[quantization_mode],
                     "is_df11": False,
