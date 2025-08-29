@@ -22,7 +22,12 @@ BAGEL is an open-source multimodal foundation model with 7B active parameters (1
 ## Installation
 
 ### 1. Model Selection and Download
-The ComfyUI-Bagel node supports automatic model selection with intelligent quantization:
+The ComfyUI-Bagel node provides a model selection dropdown with automatic downloading capabilities:
+- **Model Selection UI**: Choose from available Hugging Face repository IDs or local folder names in the dropdown
+- **Auto-download Feature**: When `allow_auto_download` is enabled, models are automatically downloaded to `models/bagel/` on first use
+- **Local Model Detection**: The node automatically scans for locally installed models in the `models/bagel/` directory
+
+**Available Models:**
 - **ByteDance-Seed/BAGEL-7B-MoT**: Standard model with multiple quantization options
   - **BF16**: Full precision mode (~80GB VRAM recommended for multi-GPU)
   - **NF4**: 4-bit quantization (~12-32GB VRAM, highly recommended for single GPU)
@@ -34,7 +39,7 @@ The ComfyUI-Bagel node supports automatic model selection with intelligent quant
 
 **Memory is automatically calculated** based on your GPU specifications and selected quantization mode - no manual configuration needed!
 
-Models will be automatically downloaded to `models/bagel/` when first selected. You can also manually download them:
+For manual installation, you can download models to `models/bagel/`:
 
 #### Standard Model
 ```bash
@@ -84,7 +89,7 @@ Restart ComfyUI to load the new nodes.
 Generate high-quality images from text descriptions. Suitable for creative design and content generation.
 
 ### Image Editing Workflow
-![image editing workflow](example_workflows/bagel_image_edit.png)
+![image editing workflow](example_workflows/bagel_image_editing.png)
 Edit existing images based on textual descriptions, supporting local modifications and style adjustments.
 
 ### Image Understanding Workflow

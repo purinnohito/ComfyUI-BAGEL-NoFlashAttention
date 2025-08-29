@@ -5,47 +5,6 @@
   "last_link_id": 3,
   "nodes": [
     {
-      "id": 3,
-      "type": "LoadImage",
-      "pos": [
-        100,
-        318
-      ],
-      "size": [
-        315,
-        314
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "label": "IMAGE",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            2
-          ]
-        },
-        {
-          "label": "MASK",
-          "name": "MASK",
-          "type": "MASK",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.30",
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "meme.jpg",
-        "image"
-      ]
-    },
-    {
       "id": 4,
       "type": "ShowText|pysssss",
       "pos": [
@@ -82,7 +41,7 @@
         "Node name for S&R": "ShowText|pysssss"
       },
       "widgets_values": [
-        "The humor in this meme comes from the exaggerated change in handwriting style over the course of an exam. The first two pages show neat, legible handwriting, suggesting a calm and focused start to the exam. However, as the meme progresses to the middle and last pages, the handwriting becomes increasingly messy and difficult to read, symbolizing the stress and anxiety that often builds up as the exam progresses. The final page, resembling an electrocardiogram (ECG) reading, humorously represents the extreme stress and possibly even the physical symptoms of exam anxiety. The meme plays on the common experience of feeling more and more overwhelmed and stressed as an exam progresses."
+        "The humor in this meme comes from the exaggerated change in handwriting style as the exam progresses. At the beginning, the handwriting is clear and legible, indicating a confident and well-prepared student. However, as the exam continues, the handwriting becomes increasingly difficult to read, suggesting that the student is becoming more anxious and less focused. The final part of the meme shows an electrocardiogram (ECG) line, which humorously implies that the student's heart rate is racing and their writing is becoming erratic, much like the fluctuations in an ECG reading. This visual representation of stress and anxiety in the final pages of an exam is what makes the meme funny."
       ]
     },
     {
@@ -150,10 +109,10 @@
       ],
       "size": [
         315,
-        82
+        106
       ],
       "flags": {},
-      "order": 1,
+      "order": 0,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -174,7 +133,49 @@
       },
       "widgets_values": [
         "DFloat11/BAGEL-7B-MoT-DF11",
+        "BF16",
         "BF16"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "LoadImage",
+      "pos": [
+        100,
+        318
+      ],
+      "size": [
+        315,
+        314
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "IMAGE",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            2
+          ]
+        },
+        {
+          "label": "MASK",
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.30",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "meme.jpg",
+        "image"
       ]
     }
   ],
@@ -208,13 +209,13 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6588450000000002,
+      "scale": 0.9646149645000006,
       "offset": [
-        863.798180907497,
-        313.1051537159724
+        0,
+        -30
       ]
     },
-    "frontendVersion": "1.17.11",
+    "frontendVersion": "1.25.10",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
     "VHS_MetadataImage": true,

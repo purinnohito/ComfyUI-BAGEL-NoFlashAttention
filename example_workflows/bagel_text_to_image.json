@@ -82,7 +82,7 @@
       },
       "widgets_values": [
         "A female cosplayer portraying an ethereal fairy or elf, wearing a flowing dress made of delicate fabrics in soft, mystical colors like emerald green and silver. She has pointed ears, a gentle, enchanting expression, and her outfit is adorned with sparkling jewels and intricate patterns. The background is a magical forest with glowing plants, mystical creatures, and a serene atmosphere.",
-        217284,
+        812920,
         "randomize",
         "1:1",
         4,
@@ -136,7 +136,7 @@
         "Node name for S&R": "ShowText|pysssss"
       },
       "widgets_values": [
-        "<think>\nAlright, let's bring this vision to life. First, the subject is a female cosplayer dressed as an ethereal fairy or elf. Her outfit should be a flowing dress made of delicate fabrics in soft, mystical colors like emerald green and silver. The fabric should have a shimmering quality, perhaps with a slight iridescence to evoke a magical aura. The dress should be adorned with sparkling jewels and intricate patterns, adding to the enchanting feel. Her pointed ears are a key feature, signifying her elf-like or fairy nature. Her expression should be gentle and enchanting, with a soft gaze that invites wonder. The background is a magical forest, filled with glowing plants that emit a soft, ethereal light. There should be mystical creatures like fairies, small winged beings, or even a dragonfly to enhance the fantastical atmosphere. The lighting should be soft and diffused, creating a serene and dreamlike ambiance. The overall mood should be mystical and enchanting, with a focus on the beauty and otherworldliness of the scene.\n</think>"
+        "<think>\nAlright, let's bring this vision to life. First, the subject is a female cosplayer dressed as an ethereal fairy or elf. She should have a flowing dress made of delicate fabrics in soft, mystical colors like emerald green and silver. The fabric should appear light and airy, with intricate patterns that shimmer subtly, evoking a sense of magic. Her pointed ears are a key feature, signifying her elf-like nature, and her expression should be gentle and enchanting, with a soft gaze that invites wonder. The outfit should be adorned with sparkling jewels, adding a touch of elegance and mystique. The background is a magical forest, filled with glowing plants that emit a soft, ethereal light. There should be mystical creatures like fairies, butterflies, or small mythical beings fluttering around, enhancing the enchanting atmosphere. The overall mood should be serene and mystical, with a focus on creating an otherworldly and dreamlike setting. The lighting should be soft and diffused, with a gentle glow that complements the magical theme. The composition should balance the subject with the background elements, ensuring the fairy or elf remains the focal point while the forest and creatures add depth and context to the scene.\n</think>"
       ]
     },
     {
@@ -148,7 +148,7 @@
       ],
       "size": [
         315,
-        82
+        106
       ],
       "flags": {},
       "order": 0,
@@ -172,6 +172,7 @@
       },
       "widgets_values": [
         "DFloat11/BAGEL-7B-MoT-DF11",
+        false,
         "BF16"
       ]
     }
@@ -206,13 +207,13 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.9646149645000006,
+      "scale": 0.8769226950000008,
       "offset": [
-        591.6707227101431,
-        254.9799118615385
+        50,
+        20
       ]
     },
-    "frontendVersion": "1.17.11",
+    "frontendVersion": "1.25.10",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
     "VHS_MetadataImage": true,
