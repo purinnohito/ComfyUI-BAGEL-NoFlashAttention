@@ -5,7 +5,7 @@ import numpy as np
 import random
 import subprocess
 import importlib
-from typing import Dict, Tuple, Optional, Any, Union
+from typing import Dict, Tuple, Optional, Any
 from PIL import Image
 from folder_paths import folder_names_and_paths, models_dir as comfy_models_dir
 from comfy.utils import ProgressBar
@@ -13,8 +13,6 @@ from comfy.utils import ProgressBar
 # Add current directory to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
-
-from .model_utils import discover_bagel_model_dirs, is_df11_name
 
 # Import BAGEL related modules
 try:
@@ -29,7 +27,6 @@ try:
     from data.transforms import ImageTransform
     from inferencer import InterleaveInferencer
     from modeling.autoencoder import load_ae
-    from modeling.bagel.qwen2_navit import NaiveCache
     from modeling.bagel import (
         BagelConfig,
         Bagel,
@@ -59,6 +56,36 @@ folder_names_and_paths["bagel"] = (
 )
 
 
+def discover_bagel_model_dirs() -> Dict[str, str]:
+    """Discover local BAGEL model directories under the configured models/bagel folder.
+
+    Returns a mapping from folder-name -> absolute-path.
+    """
+    base_repo_dir = os.path.join(comfy_models_dir, "bagel")
+    discovered: Dict[str, str] = {}
+    try:
+        if os.path.exists(base_repo_dir):
+            for name in sorted(os.listdir(base_repo_dir)):
+                p = os.path.join(base_repo_dir, name)
+                if os.path.isdir(p):
+                    discovered[name] = p
+    except Exception as e:
+        print(f"Error discovering bagel model dirs: {e}")
+    return discovered
+
+
+def is_df11_name(name: str) -> bool:
+    """Heuristic to detect DFloat11 derived model names.
+
+    Matches folder or repo names containing dfloat11
+    """
+    if not name:
+        return False
+    low = name.lower()
+    kws = ["dfloat11", "df11", "df11-", "df11_"]
+    return any(k in low for k in kws)
+
+
 def set_seed(seed: int) -> int:
     """Set random seeds for reproducibility"""
     if seed > 0:
@@ -71,6 +98,141 @@ def set_seed(seed: int) -> int:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     return seed
+
+
+def pil_to_tensor(img: Image.Image) -> torch.Tensor:
+    """Convert PIL image to ComfyUI tensor format"""
+    img_array = np.array(img).astype(np.float32) / 255.0
+    if len(img_array.shape) == 3:
+        img_tensor = torch.from_numpy(img_array)[None,]  # Add batch dimension
+    else:
+        img_tensor = torch.from_numpy(img_array)
+    return img_tensor
+
+
+def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
+    """Convert ComfyUI tensor to PIL image"""
+    if len(tensor.shape) == 4:
+        tensor = tensor[0]  # Remove batch dimension
+    img_array = (tensor.cpu().numpy() * 255).astype(np.uint8)
+    return Image.fromarray(img_array)
+
+
+def get_image_shapes_map() -> Dict[str, Tuple[int, int]]:
+    """Get mapping of aspect ratios to image dimensions"""
+    return {
+        "1:1": (1024, 1024),
+        "4:3": (768, 1024),
+        "3:4": (1024, 768),
+        "16:9": (576, 1024),
+        "9:16": (1024, 576),
+    }
+
+
+def find_vae_path(model_dir: str) -> Optional[str]:
+    """Find VAE model file in standard locations"""
+    common_vae_dir = os.path.join(comfy_models_dir, "vae")
+    common_vae_file = os.path.join(common_vae_dir, "ae.safetensors")
+    
+    potential_vae_paths = [
+        os.path.join(model_dir, "vae", "ae.safetensors"),
+        os.path.join(model_dir, "ae.safetensors"),
+        common_vae_file,
+    ]
+    
+    for vae_path in potential_vae_paths:
+        if os.path.exists(vae_path):
+            return vae_path
+    
+    return None
+
+
+def load_vae_model(model_dir: str):
+    """Load VAE model from standard locations"""
+    vae_path = find_vae_path(model_dir)
+    if not vae_path:
+        potential_paths = [
+            os.path.join(model_dir, "vae", "ae.safetensors"),
+            os.path.join(model_dir, "ae.safetensors"),
+            os.path.join(comfy_models_dir, "vae", "ae.safetensors"),
+        ]
+        raise FileNotFoundError(
+            f"VAE model (ae.safetensors) could not be found in any of the expected paths: {potential_paths}"
+        )
+    
+    try:
+        vae_model, vae_config = load_ae(local_path=vae_path)
+        if vae_model is None or vae_config is None:
+            raise ValueError(f"Failed to load VAE from {vae_path}")
+        return vae_model, vae_config, vae_path
+    except Exception as e:
+        raise RuntimeError(f"Error loading VAE from {vae_path}: {e}")
+
+
+def create_error_response_image() -> torch.Tensor:
+    """Create a default error response image tensor"""
+    return torch.zeros((1, 512, 512, 3))
+
+
+def validate_seed(seed: int) -> bool:
+    """Validate seed parameter"""
+    return isinstance(seed, int) and seed >= 0
+
+
+def validate_cfg_scale(scale: float, min_val: float = 1.0, max_val: float = 8.0) -> bool:
+    """Validate CFG scale parameter"""
+    return isinstance(scale, (int, float)) and min_val <= scale <= max_val
+
+
+def validate_timesteps(timesteps: int, min_val: int = 10, max_val: int = 100) -> bool:
+    """Validate timesteps parameter"""
+    return isinstance(timesteps, int) and min_val <= timesteps <= max_val
+
+
+def validate_temperature(temp: float) -> bool:
+    """Validate temperature parameter"""
+    return isinstance(temp, (int, float)) and 0.0 <= temp <= 1.0
+
+
+def validate_max_tokens(tokens: int, min_val: int = 64, max_val: int = 4096) -> bool:
+    """Validate max tokens parameter"""
+    return isinstance(tokens, int) and min_val <= tokens <= max_val
+
+
+def setup_inference_progress_bar(num_timesteps: int) -> ProgressBar:
+    """Setup progress bar for inference operations"""
+    actual_iterations = num_timesteps - 1 if num_timesteps > 0 else 0
+    return ProgressBar(actual_iterations)
+
+
+def create_common_inference_config(
+    cfg_text_scale: float,
+    num_timesteps: int,
+    cfg_interval: float = 0.4,
+    timestep_shift: float = 3.0,
+    cfg_renorm_min: float = 0.0,
+    cfg_renorm_type: str = "global",
+    text_temperature: float = 0.3,
+    show_thinking: bool = False,
+    **kwargs
+) -> Dict[str, Any]:
+    """Create common inference configuration dictionary"""
+    config = {
+        "max_think_token_n": 1024 if show_thinking else 1024,
+        "do_sample": False if not show_thinking else False,
+        "text_temperature": text_temperature if show_thinking else 0.3,
+        "cfg_text_scale": cfg_text_scale,
+        "cfg_interval": [cfg_interval, 1.0],  # End value fixed at 1.0
+        "timestep_shift": timestep_shift,
+        "num_timesteps": num_timesteps,
+        "cfg_renorm_min": cfg_renorm_min,
+        "cfg_renorm_type": cfg_renorm_type,
+    }
+    
+    # Add additional parameters
+    config.update(kwargs)
+    
+    return config
 
 
 def download_model_with_git(
@@ -183,27 +345,6 @@ def check_model_files(model_path: str, is_df11_model: bool) -> bool:
             return False
 
     return True
-
-
-# discover_bagel_model_dirs is imported from model_utils or provided as a fallback at file top
-
-
-def pil_to_tensor(img: Image.Image) -> torch.Tensor:
-    """Convert PIL image to ComfyUI tensor format"""
-    img_array = np.array(img).astype(np.float32) / 255.0
-    if len(img_array.shape) == 3:
-        img_tensor = torch.from_numpy(img_array)[None,]  # Add batch dimension
-    else:
-        img_tensor = torch.from_numpy(img_array)
-    return img_tensor
-
-
-def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
-    """Convert ComfyUI tensor to PIL image"""
-    if len(tensor.shape) == 4:
-        tensor = tensor[0]  # Remove batch dimension
-    img_array = (tensor.cpu().numpy() * 255).astype(np.uint8)
-    return Image.fromarray(img_array)
 
 
 def calculate_optimal_memory_gb(quantization_mode: str) -> float:
@@ -404,12 +545,11 @@ class BagelModelLoader:
                 )
                 quantization_mode = "BF16"
 
+            common_vae_dir = os.path.join(comfy_models_dir, "vae")
+
             print(
                 f"Loading {model_path} -> local folder {local_model_dir} with {self.QUANTIZATION_MODES[quantization_mode]} mode..."
             )
-
-            common_vae_dir = os.path.join(comfy_models_dir, "vae")
-            common_vae_file = os.path.join(common_vae_dir, "ae.safetensors")
 
             if not os.path.exists(local_model_dir) or not check_model_files(local_model_dir, is_df11_model):
                 # If the selection was a local folder, do not auto-download
@@ -451,26 +591,8 @@ class BagelModelLoader:
             vit_config.rope = False
             vit_config.num_hidden_layers -= 1
 
-            vae_model, vae_config = None, None
-            potential_vae_paths = [
-                os.path.join(local_model_dir, "vae", "ae.safetensors"),
-                os.path.join(local_model_dir, "ae.safetensors"),
-                common_vae_file,
-            ]
-            vae_loaded_path = None
-            for vae_path_to_try in potential_vae_paths:
-                if os.path.exists(vae_path_to_try):
-                    try:
-                        vae_model, vae_config = load_ae(local_path=vae_path_to_try)
-                        if vae_model is not None and vae_config is not None:
-                            vae_loaded_path = vae_path_to_try
-                            break
-                    except Exception as e:
-                        print(f"Failed to load VAE from {vae_path_to_try}: {e}")
-            if not vae_loaded_path:
-                raise FileNotFoundError(
-                    f"VAE model (ae.safetensors) could not be loaded from any of the expected paths: {potential_vae_paths}"
-                )
+            # Load VAE model using unified function
+            vae_model, vae_config, vae_loaded_path = load_vae_model(local_model_dir)
 
             if is_df11_model:
                 config = BagelConfig(
@@ -879,24 +1001,16 @@ class BagelTextToImage:
         cls, model, prompt, seed, image_ratio, cfg_text_scale, num_timesteps, **kwargs
     ):
         """Validate input parameters"""
-        if not isinstance(seed, int) or seed < 0:
+        if not validate_seed(seed):
             return "Seed must be a non-negative integer"
 
         if image_ratio not in ["1:1", "4:3", "3:4", "16:9", "9:16"]:
             return f"Invalid image_ratio: {image_ratio}"
 
-        if (
-            not isinstance(cfg_text_scale, (int, float))
-            or cfg_text_scale < 1.0
-            or cfg_text_scale > 8.0
-        ):
+        if not validate_cfg_scale(cfg_text_scale):
             return "cfg_text_scale must be between 1.0 and 8.0"
 
-        if (
-            not isinstance(num_timesteps, int)
-            or num_timesteps < 10
-            or num_timesteps > 100
-        ):
+        if not validate_timesteps(num_timesteps):
             return "num_timesteps must be between 10 and 100"
 
         return True
@@ -944,33 +1058,24 @@ class BagelTextToImage:
             inferencer = model["inferencer"]
 
             # Set image dimensions
-            image_shapes_map = {
-                "1:1": (1024, 1024),
-                "4:3": (768, 1024),
-                "3:4": (1024, 768),
-                "16:9": (576, 1024),
-                "9:16": (1024, 576),
-            }
+            image_shapes_map = get_image_shapes_map()
             image_shapes = image_shapes_map[image_ratio]
 
             # Set inference hyperparameters
-            inference_hyper = {
-                "max_think_token_n": 1024 if show_thinking else 1024,
-                "do_sample": False if not show_thinking else False,
-                "text_temperature": text_temperature if show_thinking else 0.3,
-                "cfg_text_scale": cfg_text_scale,
-                "cfg_interval": [cfg_interval, 1.0],  # End value fixed at 1.0
-                "timestep_shift": timestep_shift,
-                "num_timesteps": num_timesteps,
-                "cfg_renorm_min": cfg_renorm_min,
-                "cfg_renorm_type": cfg_renorm_type,
-                "image_shapes": image_shapes,
-            }
+            inference_hyper = create_common_inference_config(
+                cfg_text_scale=cfg_text_scale,
+                num_timesteps=num_timesteps,
+                cfg_interval=cfg_interval,
+                timestep_shift=timestep_shift,
+                cfg_renorm_min=cfg_renorm_min,
+                cfg_renorm_type=cfg_renorm_type,
+                text_temperature=text_temperature,
+                show_thinking=show_thinking,
+                image_shapes=image_shapes,
+            )
 
             # Initialize ProgressBar
-            # The loop in Bagel.generate_image runs for (num_timesteps - 1) iterations
-            actual_iterations = num_timesteps - 1 if num_timesteps > 0 else 0
-            pbar = ProgressBar(actual_iterations)
+            pbar = setup_inference_progress_bar(num_timesteps)
 
             # Call inferencer, passing pbar
             result = inferencer(
@@ -991,8 +1096,7 @@ class BagelTextToImage:
         except Exception as e:
             print(f"Error in text to image generation: {e}")
             # Return empty image and error message
-            empty_image = torch.zeros((1, 512, 512, 3))
-            return (empty_image, f"Error: {str(e)}")
+            return (create_error_response_image(), f"Error: {str(e)}")
 
 
 class BagelImageEdit:
@@ -1121,28 +1225,16 @@ class BagelImageEdit:
         num_timesteps,
         **kwargs,
     ):
-        if not isinstance(seed, int) or seed < 0:
+        if not validate_seed(seed):
             return "Seed must be a non-negative integer"
 
-        if (
-            not isinstance(cfg_text_scale, (int, float))
-            or cfg_text_scale < 1.0
-            or cfg_text_scale > 8.0
-        ):
+        if not validate_cfg_scale(cfg_text_scale):
             return "cfg_text_scale must be between 1.0 and 8.0"
 
-        if (
-            not isinstance(cfg_img_scale, (int, float))
-            or cfg_img_scale < 1.0
-            or cfg_img_scale > 4.0
-        ):
+        if not validate_cfg_scale(cfg_img_scale, min_val=1.0, max_val=4.0):
             return "cfg_img_scale must be between 1.0 and 4.0"
 
-        if (
-            not isinstance(num_timesteps, int)
-            or num_timesteps < 10
-            or num_timesteps > 100
-        ):
+        if not validate_timesteps(num_timesteps):
             return "num_timesteps must be between 10 and 100"
 
         return True
@@ -1196,22 +1288,20 @@ class BagelImageEdit:
             pil_image = pil_img2rgb(pil_image)
 
             # Set inference hyperparameters
-            inference_hyper = {
-                "max_think_token_n": 1024 if show_thinking else 1024,
-                "do_sample": False if not show_thinking else False,
-                "text_temperature": text_temperature if show_thinking else 0.3,
-                "cfg_text_scale": cfg_text_scale,
-                "cfg_img_scale": cfg_img_scale,
-                "cfg_interval": [cfg_interval, 1.0],  # End value fixed at 1.0
-                "timestep_shift": timestep_shift,
-                "num_timesteps": num_timesteps,
-                "cfg_renorm_min": cfg_renorm_min,
-                "cfg_renorm_type": cfg_renorm_type,
-            }
+            inference_hyper = create_common_inference_config(
+                cfg_text_scale=cfg_text_scale,
+                num_timesteps=num_timesteps,
+                cfg_interval=cfg_interval,
+                timestep_shift=timestep_shift,
+                cfg_renorm_min=cfg_renorm_min,
+                cfg_renorm_type=cfg_renorm_type,
+                text_temperature=text_temperature,
+                show_thinking=show_thinking,
+                cfg_img_scale=cfg_img_scale,
+            )
 
             # Initialize ProgressBar
-            actual_iterations = num_timesteps - 1 if num_timesteps > 0 else 0
-            pbar = ProgressBar(actual_iterations)
+            pbar = setup_inference_progress_bar(num_timesteps)
 
             # Call inferencer, passing pbar
             result = inferencer(
@@ -1299,13 +1389,11 @@ class BagelImageUnderstanding:
         """Validate input parameters"""
         # Validate optional parameters
         if "text_temperature" in kwargs:
-            temp = kwargs["text_temperature"]
-            if not isinstance(temp, (int, float)) or temp < 0.0 or temp > 1.0:
+            if not validate_temperature(kwargs["text_temperature"]):
                 return "text_temperature must be between 0.0 and 1.0"
 
         if "max_new_tokens" in kwargs:
-            tokens = kwargs["max_new_tokens"]
-            if not isinstance(tokens, int) or tokens < 64 or tokens > 4096:
+            if not validate_max_tokens(kwargs["max_new_tokens"]):
                 return "max_new_tokens must be between 64 and 4096"
 
         return True
