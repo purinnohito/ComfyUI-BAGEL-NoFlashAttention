@@ -86,6 +86,18 @@ def is_df11_name(name: str) -> bool:
     return any(k in low for k in kws)
 
 
+def is_echo4o_name(name: str) -> bool:
+    """Heuristic to detect Echo-4o model names.
+    
+    Matches folder or repo names containing echo-4o, echo4o
+    """
+    if not name:
+        return False
+    low = name.lower()
+    kws = ["echo-4o", "echo4o", "yejy53/echo-4o"]
+    return any(k in low for k in kws)
+
+
 def set_seed(seed: int) -> int:
     """Set random seeds for reproducibility"""
     if seed > 0:
@@ -277,42 +289,103 @@ def download_model_with_git(
         return None
 
 
+def fix_nested_model_structure(model_dir: str, repo_id: str) -> bool:
+    """
+    Fix nested model directory structure if exists.
+    
+    Some downloads may create nested folders like models/bagel/Echo-4o/Echo-4o/
+    This function detects and fixes such structure to models/bagel/Echo-4o/
+    
+    Args:
+        model_dir: The expected model directory path
+        repo_id: Repository ID (e.g., "Yejy53/Echo-4o")
+        
+    Returns:
+        True if structure was fixed or already correct, False if error
+    """
+    if not os.path.exists(model_dir):
+        return False
+    
+    try:
+        repo_name = repo_id.split("/")[-1]
+        nested_path = os.path.join(model_dir, repo_name)
+        
+        # Check if nested structure exists
+        if os.path.exists(nested_path) and os.path.isdir(nested_path):
+            nested_files = os.listdir(nested_path)
+            main_files = [f for f in os.listdir(model_dir) if f != repo_name and not f.startswith('.')]
+            
+            # If main directory only contains the nested folder and some metadata
+            if len(main_files) == 0 and nested_files:
+                print(f"Fixing nested directory structure: {nested_path} -> {model_dir}")
+                
+                # Move all files from nested directory to parent
+                import shutil
+                for item in nested_files:
+                    src = os.path.join(nested_path, item)
+                    dst = os.path.join(model_dir, item)
+                    if os.path.exists(dst):
+                        if os.path.isdir(dst):
+                            shutil.rmtree(dst)
+                        else:
+                            os.remove(dst)
+                    shutil.move(src, dst)
+                
+                # Remove empty nested directory
+                os.rmdir(nested_path)
+                print("Successfully fixed nested directory structure")
+                return True
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error fixing nested structure: {e}")
+        return False
+
+
 def download_model_with_hf_hub(
     model_dir: str, repo_id: str = "ByteDance-Seed/BAGEL-7B-MoT"
 ) -> str:
     """
-    Download model using huggingface_hub (fallback method)
-
+    Download model using huggingface_hub with resume support
+    
     Args:
         model_dir: Directory to download the repo to (repo files will be placed directly here)
         repo_id: Hugging Face repository ID
-
+        
     Returns:
         Path to the downloaded model if successful, None otherwise
     """
     try:
         from huggingface_hub import snapshot_download
-
-        print(f"Downloading BAGEL model using huggingface_hub to {model_dir}...")
-
+        
+        print(f"Downloading model from {repo_id} using huggingface_hub to {model_dir}...")
+        
         # Create parent directory if it doesn't exist
         os.makedirs(model_dir, exist_ok=True)
-
-        # Download the entire repository directly to model_dir
-        snapshot_download(
-            repo_id=repo_id, local_dir=model_dir, local_dir_use_symlinks=False
+        
+        # Download with resume support and better error handling
+        downloaded_path = snapshot_download(
+            repo_id=repo_id,
+            local_dir=model_dir,
+            local_dir_use_symlinks=False,
+            resume_download=True,  # Enable resume functionality
+            force_download=False,  # Don't re-download existing files
         )
-
-        print(f"Successfully downloaded BAGEL model to {model_dir}")
+        
+        # Fix any nested directory structure
+        fix_nested_model_structure(model_dir, repo_id)
+        
+        print(f"Successfully downloaded model from {repo_id} to {model_dir}")
         return model_dir
-
+        
     except ImportError:
         print(
             "huggingface_hub not installed. Please install it with: pip install huggingface_hub"
         )
         return None
     except Exception as e:
-        print(f"Error downloading model with huggingface_hub: {e}")
+        print(f"Error downloading model {repo_id} with huggingface_hub: {e}")
         return None
 
 
@@ -415,6 +488,7 @@ class BagelModelLoader:
     SUPPORTED_MODEL_REPOS = [
         "ByteDance-Seed/BAGEL-7B-MoT",
         "DFloat11/BAGEL-7B-MoT-DF11",
+        "Yejy53/Echo-4o",
     ]
 
     QUANTIZATION_MODES = {
@@ -482,7 +556,7 @@ class BagelModelLoader:
         if quantization_mode not in cls.QUANTIZATION_MODES:
             return f"Invalid quantization_mode: {quantization_mode}. Supported: {list(cls.QUANTIZATION_MODES.keys())}"
 
-        # Determine whether selected model implies DF11
+        # Determine whether selected model implies DF11 or Echo-4o
         final_is_df11 = False
         # local folder selected (just the folder name)
         if isinstance(model_path, str) and model_path in discovered:
@@ -522,22 +596,24 @@ class BagelModelLoader:
 
             discovered = discover_bagel_model_dirs()
 
-            # Resolve local_model_dir and df11 flag
+            # Resolve local_model_dir and model type flags
             is_df11_model = False
+            is_echo4o_model = False
             local_model_dir = None
             # If a local folder name is selected
             if isinstance(model_path, str) and model_path in discovered:
                 repo_name_segment = model_path
                 local_model_dir = discovered[repo_name_segment]
                 is_df11_model = is_df11_name(repo_name_segment)
+                is_echo4o_model = is_echo4o_name(repo_name_segment)
             else:
                 # remote selection must be in SUPPORTED_MODEL_REPOS
                 if model_path not in self.SUPPORTED_MODEL_REPOS:
                     raise FileNotFoundError(f"Unsupported remote model selection: {model_path}. Supported: {self.SUPPORTED_MODEL_REPOS}")
                 repo_name_segment = model_path.split("/")[-1]
-                base_repo_dir = os.path.join(comfy_models_dir, "bagel")
-                local_model_dir = os.path.join(base_repo_dir, repo_name_segment)
+                local_model_dir = os.path.join(comfy_models_dir, "bagel", repo_name_segment)
                 is_df11_model = is_df11_name(model_path)
+                is_echo4o_model = is_echo4o_name(model_path)
 
             if is_df11_model and quantization_mode != "BF16":
                 print(
@@ -545,11 +621,19 @@ class BagelModelLoader:
                 )
                 quantization_mode = "BF16"
 
+            # Echo-4o models use same configuration as standard BAGEL models
+            if is_echo4o_model:
+                print(f"Echo-4o model detected: {model_path} (Enhanced BAGEL with multi-image support)")
+
             common_vae_dir = os.path.join(comfy_models_dir, "vae")
 
+            model_type = "DFloat11" if is_df11_model else ("Echo-4o" if is_echo4o_model else "BAGEL")
             print(
-                f"Loading {model_path} -> local folder {local_model_dir} with {self.QUANTIZATION_MODES[quantization_mode]} mode..."
+                f"Loading {model_type} model: {model_path} -> {local_model_dir} with {self.QUANTIZATION_MODES[quantization_mode]} mode..."
             )
+
+            # Fix any existing nested directory structure
+            fix_nested_model_structure(local_model_dir, model_path)
 
             if not os.path.exists(local_model_dir) or not check_model_files(local_model_dir, is_df11_model):
                 # If the selection was a local folder, do not auto-download
@@ -571,6 +655,34 @@ class BagelModelLoader:
                     )
 
                 print(f"Successfully downloaded BAGEL model to {local_model_dir}")
+
+                # Check for nested directory structure and fix if needed
+                repo_name = model_path.split("/")[-1]
+                nested_path = os.path.join(local_model_dir, repo_name)
+                
+                if os.path.exists(nested_path) and os.path.isdir(nested_path):
+                    # Check if main directory is empty except for the nested folder
+                    main_files = [f for f in os.listdir(local_model_dir) if f != repo_name and not f.startswith('.')]
+                    nested_files = os.listdir(nested_path)
+                    
+                    if len(main_files) == 0 and len(nested_files) > 0:
+                        print(f"Detected nested folder structure. Moving files from {nested_path} to {local_model_dir}")
+                        
+                        # Move all files from nested directory to parent directory
+                        import shutil
+                        for item in nested_files:
+                            src = os.path.join(nested_path, item)
+                            dst = os.path.join(local_model_dir, item)
+                            if os.path.exists(dst):
+                                if os.path.isdir(dst):
+                                    shutil.rmtree(dst)
+                                else:
+                                    os.remove(dst)
+                            shutil.move(src, dst)
+                        
+                        # Remove the now-empty nested directory
+                        os.rmdir(nested_path)
+                        print(f"Successfully flattened directory structure for {model_path}")
 
             if not check_model_files(local_model_dir, is_df11_model):
                 raise FileNotFoundError(
@@ -704,6 +816,8 @@ class BagelModelLoader:
                     "model_path": local_model_dir,
                     "model_repo_id": model_path,
                     "is_df11": is_df11_model,
+                    "is_echo4o": is_echo4o_model,
+                    "model_type": "DFloat11" if is_df11_model else ("Echo-4o" if is_echo4o_model else "BAGEL"),
                     "device": "cuda" if torch.cuda.is_available() else "cpu",
                 }
                 print(f"Successfully loaded BAGEL DF11 model from {local_model_dir}")
@@ -876,11 +990,14 @@ class BagelModelLoader:
                     "quantization_mode": quantization_mode,
                     "quantization_info": self.QUANTIZATION_MODES[quantization_mode],
                     "is_df11": False,
+                    "is_echo4o": is_echo4o_model,
+                    "model_type": "Echo-4o" if is_echo4o_model else "BAGEL",
                     "device": "cuda" if torch.cuda.is_available() else "cpu",
                 }
 
+                model_type_display = "Echo-4o" if is_echo4o_model else "BAGEL"
                 print(
-                    f"Successfully loaded BAGEL model with {self.QUANTIZATION_MODES[quantization_mode]} mode"
+                    f"Successfully loaded {model_type_display} model with {self.QUANTIZATION_MODES[quantization_mode]} mode"
                 )
                 return (model_dict,)
 
@@ -1458,12 +1575,270 @@ class BagelImageUnderstanding:
             return (f"Error: {str(e)}",)
 
 
+class BagelMultiImageEdit:
+    """BAGEL Multi-Image Edit Node - Enhanced for Echo-4o (2-4 reference images)"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("BAGEL_MODEL", {"tooltip": "BAGEL/Echo-4o model"}),
+                "ref_image_1": ("IMAGE", {"tooltip": "First reference image (required)"}),
+                "ref_image_2": ("IMAGE", {"tooltip": "Second reference image (required)"}),
+                "prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "Combine elements from the reference images according to the description.",
+                        "tooltip": "Multi-image editing prompt",
+                    },
+                ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": 0,
+                        "min": 0,
+                        "max": 1000000,
+                        "tooltip": "Random seed, 0 for random",
+                    },
+                ),
+                "cfg_text_scale": (
+                    "FLOAT",
+                    {
+                        "default": 4.0,
+                        "min": 1.0,
+                        "max": 8.0,
+                        "step": 0.1,
+                        "tooltip": "CFG text scaling",
+                    },
+                ),
+                "cfg_img_scale": (
+                    "FLOAT",
+                    {
+                        "default": 2.0,
+                        "min": 1.0,
+                        "max": 3.0,
+                        "step": 0.1,
+                        "tooltip": "CFG image scaling",
+                    },
+                ),
+                "num_timesteps": (
+                    "INT",
+                    {
+                        "default": 50,
+                        "min": 10,
+                        "max": 100,
+                        "step": 5,
+                        "tooltip": "Denoising steps",
+                    },
+                ),
+            },
+            "optional": {
+                "ref_image_3": ("IMAGE", {"tooltip": "Third reference image (optional)"}),
+                "ref_image_4": ("IMAGE", {"tooltip": "Fourth reference image (optional)"}),
+                "show_thinking": (
+                    "BOOLEAN",
+                    {"default": False, "tooltip": "Display reasoning process"},
+                ),
+                "cfg_interval": (
+                    "FLOAT",
+                    {
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.1,
+                        "tooltip": "CFG interval start value",
+                    },
+                ),
+                "timestep_shift": (
+                    "FLOAT",
+                    {
+                        "default": 3.0,
+                        "min": 1.0,
+                        "max": 5.0,
+                        "step": 0.5,
+                        "tooltip": "Timestep offset",
+                    },
+                ),
+                "cfg_renorm_min": (
+                    "FLOAT",
+                    {
+                        "default": 0.0,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.1,
+                        "tooltip": "CFG re-normalization minimum value",
+                    },
+                ),
+                "cfg_renorm_type": (
+                    ["global", "local", "text_channel"],
+                    {"default": "text_channel", "tooltip": "CFG re-normalization type"},
+                ),
+                "text_temperature": (
+                    "FLOAT",
+                    {
+                        "default": 0.3,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.1,
+                        "tooltip": "Text generation temperature",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("image", "thinking")
+    FUNCTION = "edit_multi_images"
+    CATEGORY = "BAGEL/Enhanced"
+
+    @classmethod
+    def VALIDATE_INPUTS(
+        cls, model, ref_image_1, ref_image_2, prompt, seed, cfg_text_scale, cfg_img_scale, num_timesteps, **kwargs
+    ):
+        """Validate input parameters"""
+        if not validate_seed(seed):
+            return "Invalid seed value"
+
+        if not validate_cfg_scale(cfg_text_scale):
+            return "Invalid cfg_text_scale value"
+
+        if not validate_cfg_scale(cfg_img_scale, min_val=1.0, max_val=3.0):
+            return "Invalid cfg_img_scale value"
+
+        if not validate_timesteps(num_timesteps):
+            return "Invalid num_timesteps value"
+
+        return True
+
+    def edit_multi_images(
+        self,
+        model: Dict[str, Any],
+        ref_image_1: torch.Tensor,
+        ref_image_2: torch.Tensor,
+        prompt: str,
+        seed: int,
+        cfg_text_scale: float,
+        cfg_img_scale: float,
+        num_timesteps: int,
+        ref_image_3: Optional[torch.Tensor] = None,
+        ref_image_4: Optional[torch.Tensor] = None,
+        show_thinking: bool = False,
+        cfg_interval: float = 0.0,
+        timestep_shift: float = 3.0,
+        cfg_renorm_min: float = 0.0,
+        cfg_renorm_type: str = "text_channel",
+        text_temperature: float = 0.3,
+    ) -> Tuple[torch.Tensor, str]:
+        """
+        Edit multiple images using BAGEL/Echo-4o model
+
+        Args:
+            model: BAGEL model dictionary
+            ref_image_1: First reference image (required)
+            ref_image_2: Second reference image (required)
+            prompt: Multi-image editing prompt
+            seed: Random seed
+            cfg_text_scale: CFG text scaling
+            cfg_img_scale: CFG image scaling  
+            num_timesteps: Denoising steps
+            ref_image_3: Third reference image (optional)
+            ref_image_4: Fourth reference image (optional)
+            show_thinking: Whether to display the reasoning process
+            cfg_interval: CFG interval start value
+            timestep_shift: Timestep offset
+            cfg_renorm_min: CFG re-normalization minimum value
+            cfg_renorm_type: CFG re-normalization type
+            text_temperature: Text generation temperature
+
+        Returns:
+            Generated image tensor and reasoning process text
+        """
+        try:
+            # Set random seed
+            set_seed(seed)
+
+            # Get inferencer
+            inferencer = model["inferencer"]
+            
+            # Check if this is Echo-4o model
+            is_echo4o = model.get("is_echo4o", False)
+            model_type = model.get("model_type", "BAGEL")
+            
+            if not is_echo4o:
+                print("Note: Multi-image editing is optimized for Echo-4o models. Current model may have limited multi-image support.")
+
+            # Collect all reference images
+            pil_images = []
+            
+            # Add required images
+            pil_images.append(tensor_to_pil(ref_image_1))
+            pil_images.append(tensor_to_pil(ref_image_2))
+            
+            # Add optional images if provided
+            if ref_image_3 is not None:
+                pil_images.append(tensor_to_pil(ref_image_3))
+            if ref_image_4 is not None:
+                pil_images.append(tensor_to_pil(ref_image_4))
+
+            print(f"Processing {len(pil_images)} reference images with {model_type} model")
+
+            # Set up progress bar
+            pbar = setup_inference_progress_bar(num_timesteps)
+
+            # Create inference configuration
+            inference_hyper = create_common_inference_config(
+                cfg_text_scale=cfg_text_scale,
+                num_timesteps=num_timesteps,
+                cfg_interval=cfg_interval,
+                timestep_shift=timestep_shift,
+                cfg_renorm_min=cfg_renorm_min,
+                cfg_renorm_type=cfg_renorm_type,
+                text_temperature=text_temperature,
+                show_thinking=show_thinking,
+                cfg_img_scale=cfg_img_scale,
+            )
+
+            print(f"Multi-image editing prompt: {prompt}")
+            print("-" * 50)
+            
+            # Execute inference with multiple images (Echo-4o enhanced)
+            result = inferencer(
+                image=pil_images,  # pass list of images
+                text=prompt,
+                think=show_thinking,
+                pbar=pbar,
+                **inference_hyper,
+            )
+
+            generated_image = result["image"]
+            thinking_text = result.get("text", "")
+
+            if generated_image is None:
+                print("Warning: No image generated")
+                return (create_error_response_image(), thinking_text)
+
+            # Convert PIL to tensor
+            result_tensor = pil_to_tensor(generated_image)
+
+            print(f"Multi-image editing completed with {len(pil_images)} references")
+            if show_thinking and thinking_text:
+                print(f"AI thinking process: {thinking_text[:200]}...")
+
+            return (result_tensor, thinking_text)
+
+        except Exception as e:
+            print(f"Error in multi-image editing: {e}")
+            return (create_error_response_image(), f"Error: {str(e)}")
+
+
 # Node mappings
 NODE_CLASS_MAPPINGS = {
     "BagelModelLoader": BagelModelLoader,
     "BagelTextToImage": BagelTextToImage,
     "BagelImageEdit": BagelImageEdit,
     "BagelImageUnderstanding": BagelImageUnderstanding,
+    "BagelMultiImageEdit": BagelMultiImageEdit,
 }
 
 # Display name mappings
@@ -1472,6 +1847,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BagelTextToImage": "BAGEL Text to Image",
     "BagelImageEdit": "BAGEL Image Edit",
     "BagelImageUnderstanding": "BAGEL Image Understanding",
+    "BagelMultiImageEdit": "BAGEL Multi-Image Edit (Echo-4o only)",
 }
 
 # Export for ComfyUI
