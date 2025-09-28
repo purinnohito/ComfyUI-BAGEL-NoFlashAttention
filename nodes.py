@@ -9,45 +9,33 @@ from typing import Dict, Tuple, Optional, Any
 from PIL import Image
 from folder_paths import folder_names_and_paths, models_dir as comfy_models_dir
 from comfy.utils import ProgressBar
+from accelerate import (
+    infer_auto_device_map,
+    load_checkpoint_and_dispatch,
+    init_empty_weights,
+    dispatch_model,
+)
+from accelerate.utils import BnbQuantizationConfig, load_and_quantize_model
+from dfloat11 import DFloat11Model
 
 # Add current directory to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
 # Import BAGEL related modules
-try:
-    from accelerate import (
-        infer_auto_device_map,
-        load_checkpoint_and_dispatch,
-        init_empty_weights,
-        dispatch_model,
-    )
-    from accelerate.utils import BnbQuantizationConfig, load_and_quantize_model
-    from data.data_utils import add_special_tokens, pil_img2rgb
-    from data.transforms import ImageTransform
-    from inferencer import InterleaveInferencer
-    from modeling.autoencoder import load_ae
-    from modeling.bagel import (
-        BagelConfig,
-        Bagel,
-        Qwen2Config,
-        Qwen2ForCausalLM,
-        SiglipVisionConfig,
-        SiglipVisionModel,
-    )
-    from modeling.qwen2 import Qwen2Tokenizer
-except ImportError as e:
-    print(f"Error importing BAGEL modules: {e}")
-    print("Please ensure BAGEL model files are properly installed.")
-
-try:
-    from dfloat11 import DFloat11Model
-except ImportError:
-    print("DFloat11Model not found. DFloat11 support will be unavailable.")
-    print(
-        "Please install DFloat11 if you intend to use DFloat11 models: pip install dfloat11"
-    )
-    DFloat11Model = None
+from data.data_utils import add_special_tokens, pil_img2rgb
+from data.transforms import ImageTransform
+from inferencer import InterleaveInferencer
+from modeling.autoencoder import load_ae
+from modeling.bagel import (
+    BagelConfig,
+    Bagel,
+    Qwen2Config,
+    Qwen2ForCausalLM,
+    SiglipVisionConfig,
+    SiglipVisionModel,
+)
+from modeling.qwen2 import Qwen2Tokenizer
 
 # Register the BAGEL model folder
 folder_names_and_paths["bagel"] = (
