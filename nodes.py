@@ -477,6 +477,11 @@ class BagelModelLoader:
         "ByteDance-Seed/BAGEL-7B-MoT",
         "DFloat11/BAGEL-7B-MoT-DF11",
         "Yejy53/Echo-4o",
+        "iitolstykh/Bagel-NHR-Edit",
+        "iitolstykh/Bagel-NHR-Edit-V2",
+        "sanaka87/BAGEL-RecA",
+        "theunlikely/BAGEL-RecA-DF11",
+        "multimodal-reasoning-lab/Bagel-Zebra-CoT",
     ]
 
     QUANTIZATION_MODES = {
