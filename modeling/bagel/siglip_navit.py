@@ -15,7 +15,22 @@ from torch import nn
 from transformers.activations import ACT2FN
 from modeling.siglip.configuration_siglip import SiglipVisionConfig as _SiglipVisionConfig
 from modeling.siglip.modeling_siglip import SiglipAttention, SiglipPreTrainedModel
-from flash_attn import flash_attn_varlen_func
+# flash_attn is not available on Windows, use high-precision fallback instead
+try:
+    from flash_attn import flash_attn_varlen_func
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
+    # Import high-precision fallback
+    import sys
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(os.path.dirname(current_dir))
+    sys.path.insert(0, parent_dir)
+    try:
+        from flash_attn_compat import flash_attn_varlen_func_fallback as flash_attn_varlen_func
+    except ImportError:
+        flash_attn_varlen_func = None
 
 
 class SiglipVisionConfig(_SiglipVisionConfig):
@@ -232,6 +247,7 @@ class SiglipFlashAttention2(SiglipAttention):
             query_states = torch.cat([qh, qw], dim=-1)
             key_states = torch.cat([kh, kw], dim=-1)
 
+        # Use flash_attn if available, otherwise use high-precision fallback
         attn_output = flash_attn_varlen_func(
             query_states.to(torch.bfloat16),
             key_states.to(torch.bfloat16),

@@ -3,7 +3,7 @@ huggingface_hub
 matplotlib
 opencv_python
 pyarrow
-flash_attn
+# flash_attn  # Commented out for Windows compatibility - will use PyTorch scaled_dot_product_attention instead
 accelerate
 bitsandbytes
 # dfloat11[cuda12] # Removed the comment if u wanna use df11

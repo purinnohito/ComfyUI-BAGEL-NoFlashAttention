@@ -21,7 +21,22 @@ from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.functional import scaled_dot_product_attention
 from transformers.utils import ModelOutput
 
-from flash_attn import flash_attn_varlen_func
+# flash_attn is not available on Windows, use high-precision fallback instead
+try:
+    from flash_attn import flash_attn_varlen_func
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
+    # Import high-precision fallback
+    import sys
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(os.path.dirname(current_dir))
+    sys.path.insert(0, parent_dir)
+    try:
+        from flash_attn_compat import flash_attn_varlen_func_fallback as flash_attn_varlen_func
+    except ImportError:
+        flash_attn_varlen_func = None
 from modeling.qwen2.modeling_qwen2 import (
     Qwen2Attention, 
     Qwen2MLP, 
@@ -167,7 +182,7 @@ class Qwen2Config(_Qwen2Config):
         max_window_layers=28,
         attention_dropout=0.0,
         is_causal=True,
-        _attn_implementation="flash_attention_2",
+        _attn_implementation="sdpa" if not FLASH_ATTN_AVAILABLE else "flash_attention_2",
         qk_norm=True,
         layer_module="Qwen2DecoderLayer",
         freeze_und=False,
@@ -355,6 +370,7 @@ class PackedAttention(Qwen2Attention):
         cu_seqlens_q = torch.nn.functional.pad(torch.cumsum(query_lens, dim=0), (1, 0))
         cu_seqlens_k = torch.nn.functional.pad(torch.cumsum(key_values_lens, dim=0), (1, 0))
 
+        # Use flash_attn if available, otherwise use high-precision fallback
         packed_attn_output = flash_attn_varlen_func(
             q=packed_query_states,
             k=merged_key_states,
@@ -573,6 +589,7 @@ class PackedAttentionMoT(Qwen2Attention):
         cu_seqlens_q = torch.nn.functional.pad(torch.cumsum(query_lens, dim=0), (1, 0))
         cu_seqlens_k = torch.nn.functional.pad(torch.cumsum(key_values_lens, dim=0), (1, 0))
 
+        # Use flash_attn if available, otherwise use high-precision fallback
         packed_attn_output = flash_attn_varlen_func(
             q=packed_query_states,
             k=merged_key_states,

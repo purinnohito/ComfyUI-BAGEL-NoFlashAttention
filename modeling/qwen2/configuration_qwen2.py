@@ -139,7 +139,7 @@ class Qwen2Config(PretrainedConfig):
         max_window_layers=28,
         attention_dropout=0.0,
         is_causal=True,
-        _attn_implementation="flash_attention_2",
+        _attn_implementation="sdpa",  # Changed from flash_attention_2 for Windows compatibility - using sdpa for speed
         **kwargs,
     ):
         self.vocab_size = vocab_size
